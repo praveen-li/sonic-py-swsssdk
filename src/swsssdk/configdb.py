@@ -5,7 +5,7 @@ Example:
     # Write to config DB
     config_db = ConfigDBConnector()
     config_db.connect()
-    config_db.set_entry('BGP_NEIGHBOR', '10.0.0.1', {
+    config_db.mod_entry('BGP_NEIGHBOR', '10.0.0.1', {
         'admin_status': state
         })
 
@@ -17,10 +17,11 @@ Example:
     config_db.listen()
 
 """
-
 import sys
 import time
 from .dbconnector import SonicV2Connector
+
+PY3K = sys.version_info >= (3, 0)
 
 class ConfigDBConnector(SonicV2Connector):
 
@@ -28,9 +29,11 @@ class ConfigDBConnector(SonicV2Connector):
     TABLE_NAME_SEPARATOR = '|'
     KEY_SEPARATOR = '|'
 
-    def __init__(self):
-        # Connect to Redis through TCP, which does not requires root.
-        super(ConfigDBConnector, self).__init__(host='127.0.0.1')
+    def __init__(self, **kwargs):
+        # By default, connect to Redis through TCP, which does not requires root.
+        if len(kwargs) == 0:
+            kwargs['host'] = '127.0.0.1'
+        super(ConfigDBConnector, self).__init__(**kwargs)
         self.handlers = {}
 
     def __wait_for_db_init(self):
@@ -99,16 +102,28 @@ class ConfigDBConnector(SonicV2Connector):
         if raw_data == None:
             return None
         typed_data = {}
-        for key in raw_data:
+        for raw_key in raw_data:
+            key = raw_key
+            if PY3K:
+                key = raw_key.decode('utf-8')
+
             # "NULL:NULL" is used as a placeholder for objects with no attributes
             if key == "NULL":
                 pass
             # A column key with ending '@' is used to mark list-typed table items
             # TODO: Replace this with a schema-based typing mechanism.
             elif key.endswith("@"):
-                typed_data[key[:-1]] = raw_data[key].split(',')
+                value = ""
+                if PY3K:
+                    value = raw_data[raw_key].decode("utf-8").split(',')
+                else:
+                    value = raw_data[raw_key].split(',')
+                typed_data[key[:-1]] = value
             else:
-                typed_data[key] = raw_data[key]
+                if PY3K:
+                    typed_data[key] = raw_data[raw_key].decode('utf-8')
+                else:
+                    typed_data[key] = raw_data[raw_key]
         return typed_data
 
     def __typed_to_raw(self, typed_data):
@@ -142,6 +157,29 @@ class ConfigDBConnector(SonicV2Connector):
 
     def set_entry(self, table, key, data):
         """Write a table entry to config db.
+           Remove extra fields in the db which are not in the data.
+        Args:
+            table: Table name.
+            key: Key of table entry, or a tuple of keys if it is a multi-key table.
+            data: Table row data in a form of dictionary {'column_key': 'value', ...}.
+                  Pass {} as data will create an entry with no column if not already existed.
+                  Pass None as data will delete the entry.
+        """
+        key = self.serialize_key(key)
+        client = self.redis_clients[self.CONFIG_DB]
+        _hash = '{}{}{}'.format(table.upper(), self.TABLE_NAME_SEPARATOR, key)
+        if data == None:
+            client.delete(_hash)
+        else:
+            original = self.get_entry(table, key)
+            client.hmset(_hash, self.__typed_to_raw(data))
+            for k in [ k for k in original.keys() if k not in data.keys() ]:
+                if type(original[k]) == list:
+                    k = k + '@'
+                client.hdel(_hash, self.serialize_key(k))
+
+    def mod_entry(self, table, key, data):
+        """Modify a table entry to config db.
         Args:
             table: Table name.
             key: Key of table entry, or a tuple of keys if it is a multi-key table.
@@ -187,16 +225,22 @@ class ConfigDBConnector(SonicV2Connector):
         data = {}
         for key in keys:
             try:
-                (_, row) = key.split(self.TABLE_NAME_SEPARATOR, 1)
                 entry = self.__raw_to_typed(client.hgetall(key))
-                if entry != None:
-                    data[self.deserialize_key(row)] = entry
+                if entry:
+                    if PY3K:
+                        key = key.decode('utf-8')
+                        (_, row) = key.split(self.TABLE_NAME_SEPARATOR, 1)
+                        data[self.deserialize_key(row)] = entry
+                    else:
+                        (_, row) = key.split(self.TABLE_NAME_SEPARATOR, 1)
+                        data[self.deserialize_key(row)] = entry
             except ValueError:
                 pass    #Ignore non table-formated redis entries
         return data
 
-    def set_config(self, data):
-        """Write multiple tables into config db. 
+    def mod_config(self, data):
+        """Write multiple tables into config db.
+           Extra entries/fields in the db which are not in the data are kept.
         Args:
             data: config data in a dictionary form
             { 
@@ -208,7 +252,7 @@ class ConfigDBConnector(SonicV2Connector):
         for table_name in data:
             table_data = data[table_name]
             for key in table_data:
-                self.set_entry(table_name, key, table_data[key])
+                self.mod_entry(table_name, key, table_data[key])
 
     def get_config(self):
         """Read all config data. 
