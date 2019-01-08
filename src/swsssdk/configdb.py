@@ -137,7 +137,7 @@ class ConfigDBConnector(SonicV2Connector):
             if type(value) is list:
                 raw_data[key+'@'] = ','.join(value)
             else:
-                raw_data[key] = value
+                raw_data[key] = str(value)
         return raw_data
 
     @staticmethod
@@ -145,7 +145,7 @@ class ConfigDBConnector(SonicV2Connector):
         if type(key) is tuple:
             return ConfigDBConnector.KEY_SEPARATOR.join(key)
         else:
-            return key
+            return str(key)
 
     @staticmethod
     def deserialize_key(key):
@@ -226,7 +226,7 @@ class ConfigDBConnector(SonicV2Connector):
         for key in keys:
             try:
                 entry = self.__raw_to_typed(client.hgetall(key))
-                if entry:
+                if entry != None:
                     if PY3K:
                         key = key.decode('utf-8')
                         (_, row) = key.split(self.TABLE_NAME_SEPARATOR, 1)
