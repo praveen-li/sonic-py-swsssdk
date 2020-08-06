@@ -22,6 +22,7 @@ import time
 from .dbconnector import SonicV2Connector
 
 PY3K = sys.version_info >= (3, 0)
+FILTER_TABLE = ['LOCK']
 
 class ConfigDBConnector(SonicV2Connector):
 
@@ -318,6 +319,8 @@ class ConfigDBConnector(SonicV2Connector):
                 key = key.decode('utf-8')
             try:
                 (table_name, row) = key.split(self.TABLE_NAME_SEPARATOR, 1)
+                if table_name in FILTER_TABLE:
+                    continue
                 entry = self.__raw_to_typed(client.hgetall(key))
                 if entry != None:
                     data.setdefault(table_name, {})[self.deserialize_key(row)] = entry
