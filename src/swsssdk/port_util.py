@@ -3,7 +3,8 @@ Bridge/Port mapping utility library.
 """
 import swsssdk
 import re
-
+from . import logger
+from traceback import format_exc
 
 SONIC_ETHERNET_RE_PATTERN = "^Ethernet(\d+)$"
 """
@@ -113,19 +114,25 @@ def get_vlan_id_from_bvid(db, bvid):
     """
         Get the Vlan Id from Bridge Vlan Object
     """
-    db.connect('ASIC_DB')
-    vlan_obj = db.keys('ASIC_DB', str("ASIC_STATE:SAI_OBJECT_TYPE_VLAN:" + bvid))
-    vlan_entry = db.get_all('ASIC_DB', vlan_obj[0], blocking=True)
-    vlan_id = None
-    # TODO: remove the first branch after all SonicV2Connector are migrated to decode_responses
-    if isinstance(db, swsssdk.SonicV2Connector) and db.dbintf.redis_kwargs.get('decode_responses', False) == False:
-        if b"SAI_VLAN_ATTR_VLAN_ID" in vlan_entry:
-            vlan_id = vlan_entry[b"SAI_VLAN_ATTR_VLAN_ID"]
-    else:
-        if "SAI_VLAN_ATTR_VLAN_ID" in vlan_entry:
-            vlan_id = vlan_entry["SAI_VLAN_ATTR_VLAN_ID"]
+    try:
+        db.connect('ASIC_DB')
+        vlan_obj = db.keys('ASIC_DB', str("ASIC_STATE:SAI_OBJECT_TYPE_VLAN:" + bvid))
+        vlan_entry = db.get_all('ASIC_DB', vlan_obj[0], blocking=True)
+        vlan_id = None
+        # TODO: remove the first branch after all SonicV2Connector are migrated to decode_responses
+        if isinstance(db, swsssdk.SonicV2Connector) and db.dbintf.redis_kwargs.get('decode_responses', False) == False:
+            if b"SAI_VLAN_ATTR_VLAN_ID" in vlan_entry:
+                vlan_id = vlan_entry[b"SAI_VLAN_ATTR_VLAN_ID"]
+        else:
+            if "SAI_VLAN_ATTR_VLAN_ID" in vlan_entry:
+                vlan_id = vlan_entry["SAI_VLAN_ATTR_VLAN_ID"]
 
-    return vlan_id
+        return vlan_id
+    except Exception as e:
+        formatLines = format_exc().splitlines()
+        logger.error("{} {}".format(formatLines[-1], formatLines[-3]))
+        return None
+
 
 def get_rif_port_map(db):
     """
