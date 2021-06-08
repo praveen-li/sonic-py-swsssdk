@@ -423,6 +423,8 @@ class ConfigDBPipeConnector(ConfigDBConnector):
 
         for index, key in enumerate(keys):
             (table_name, row) = key.split(self.TABLE_NAME_SEPARATOR, 1)
+            if table_name in FILTER_TABLE:
+                continue
             entry = self.raw_to_typed(records[index])
             if entry is not None:
                 data.setdefault(table_name, {})[self.deserialize_key(row)] = entry
